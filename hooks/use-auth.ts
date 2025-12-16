@@ -22,8 +22,27 @@ export function useAuth(options?: UseAuthOptions) {
       // Web platform: use cookie-based auth, fetch user from API
       if (Platform.OS === "web") {
         console.log("[useAuth] Web platform: fetching user from API...");
-        const apiUser = await Api.getMe();
-        console.log("[useAuth] API user response:", apiUser);
+        
+        // Retry logic for API calls
+        let apiUser = null;
+        let retries = 3;
+        let lastError: Error | null = null;
+        
+        while (retries > 0) {
+          try {
+            apiUser = await Api.getMe();
+            console.log("[useAuth] API user response:", apiUser);
+            break; // Success, exit retry loop
+          } catch (err) {
+            lastError = err instanceof Error ? err : new Error(String(err));
+            retries--;
+            console.warn(`[useAuth] API call failed, retries left: ${retries}`, lastError);
+            if (retries > 0) {
+              // Wait before retrying (exponential backoff)
+              await new Promise(resolve => setTimeout(resolve, 1000 * (4 - retries)));
+            }
+          }
+        }
 
         if (apiUser) {
           const userInfo: Auth.User = {
@@ -42,6 +61,9 @@ export function useAuth(options?: UseAuthOptions) {
           console.log("[useAuth] Web: No authenticated user from API");
           setUser(null);
           await Auth.clearUserInfo();
+          if (lastError) {
+            setError(lastError);
+          }
         }
         return;
       }
