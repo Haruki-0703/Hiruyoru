@@ -105,6 +105,15 @@ export default function HomeScreen() {
       >
         {/* Header */}
         <View style={styles.header}>
+          <View style={styles.headerTop}>
+            <View style={{ flex: 1 }} />
+            <Pressable
+              style={[styles.settingsButton, { backgroundColor: colors.card }]}
+              onPress={() => router.push("/settings")}
+            >
+              <ThemedText style={{ fontSize: 20 }}>⚙️</ThemedText>
+            </Pressable>
+          </View>
           <ThemedText type="title" style={styles.greeting}>
             {isAuthenticated && user?.name 
               ? `こんにちは、${user.name}さん` 
@@ -303,6 +312,18 @@ const styles = StyleSheet.create({
   },
   header: {
     marginBottom: Spacing.lg,
+  },
+  headerTop: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    marginBottom: Spacing.sm,
+  },
+  settingsButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
   },
   greeting: {
     fontSize: 28,

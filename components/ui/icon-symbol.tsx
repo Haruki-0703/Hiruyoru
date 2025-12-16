@@ -30,6 +30,11 @@ const MAPPING = {
   "clock": "schedule",
   "leaf.fill": "eco",
   "flame.fill": "local-fire-department",
+  "person.2.fill": "group",
+  "bell.fill": "notifications",
+  "gearshape.fill": "settings",
+  "camera.fill": "camera-alt",
+  "photo.fill": "photo",
 } as IconMapping;
 
 /**

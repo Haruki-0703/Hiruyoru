@@ -24,6 +24,7 @@ export const Colors = {
     success: "#34C759",
     warning: "#FF9500",
     error: "#FF3B30",
+    errorLight: "#FFE5E5",
     // Category colors
     japanese: "#E74C3C",
     western: "#3498DB",
@@ -44,6 +45,7 @@ export const Colors = {
     success: "#30D158",
     warning: "#FFD60A",
     error: "#FF453A",
+    errorLight: "#3D1A1A",
     // Category colors
     japanese: "#FF6B6B",
     western: "#5DADE2",

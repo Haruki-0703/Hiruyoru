@@ -31,11 +31,13 @@ export const appRouter = router({
           category: z.enum(["japanese", "western", "chinese", "other"]),
           note: z.string().max(500).optional(),
           imageUrl: z.string().url().optional(),
+          groupId: z.number().optional(),
         })
       )
       .mutation(async ({ ctx, input }) => {
         const id = await db.createMealRecord({
           userId: ctx.user.id,
+          groupId: input.groupId || null,
           date: input.date,
           mealType: input.mealType,
           dishName: input.dishName,
@@ -273,6 +275,219 @@ export const appRouter = router({
             },
           ];
         }
+      }),
+
+    // Get group dinner recommendations based on all members' lunches
+    getGroupDinnerRecommendations: protectedProcedure
+      .input(
+        z.object({
+          groupId: z.number(),
+          date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const meals = await db.getGroupMealsForDate(input.groupId, input.date);
+        const lunches = meals.filter(m => m.mealType === "lunch");
+
+        if (lunches.length === 0) {
+          return {
+            recommendations: [
+              { name: "焼き魚定食", category: "japanese", reason: "バランスの良い和食でヘルシーです" },
+              { name: "野菜たっぷりスープ", category: "western", reason: "野菜をしっかり摂れます" },
+              { name: "豆腐ハンバーグ", category: "japanese", reason: "タンパク質を補給できます" },
+            ],
+            memberLunches: [],
+          };
+        }
+
+        const categoryNames: Record<string, string> = {
+          japanese: "和食",
+          western: "洋食",
+          chinese: "中華",
+          other: "その他",
+        };
+
+        const lunchSummary = lunches.map(l => `- ${l.userName || "メンバー"}: ${l.dishName}（${categoryNames[l.category]}）`).join("\n");
+
+        const prompt = `あなたは家族の栄養バランスを考慮した食事アドバイザーです。
+家族全員の今日のランチ情報に基づいて、夜ご飯のおすすめメニューを3つ提案してください。
+
+今日のランチ:
+${lunchSummary}
+
+以下の点を考慮してください:
+1. 家族全員の栄養バランス
+2. 味のバリエーション
+3. 家族で一緒に食べられる料理
+4. 日本の家庭で作りやすい料理
+
+必ず以下のJSON形式で回答してください:
+{
+  "recommendations": [
+    {
+      "name": "料理名",
+      "category": "japanese/western/chinese/other",
+      "reason": "おすすめの理由（50文字以内）"
+    }
+  ]
+}`;
+
+        try {
+          const response = await invokeLLM({
+            messages: [
+              { role: "system", content: "あなたは日本の家庭料理に詳しい栄養アドバイザーです。必ずJSON形式で回答してください。" },
+              { role: "user", content: prompt },
+            ],
+            response_format: {
+              type: "json_schema",
+              json_schema: {
+                name: "dinner_recommendations",
+                strict: true,
+                schema: {
+                  type: "object",
+                  properties: {
+                    recommendations: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          name: { type: "string" },
+                          category: { type: "string", enum: ["japanese", "western", "chinese", "other"] },
+                          reason: { type: "string" },
+                        },
+                        required: ["name", "category", "reason"],
+                        additionalProperties: false,
+                      },
+                    },
+                  },
+                  required: ["recommendations"],
+                  additionalProperties: false,
+                },
+              },
+            },
+          });
+
+          const content = response.choices[0]?.message?.content;
+          if (!content || typeof content !== 'string') {
+            throw new Error("No response from LLM");
+          }
+
+          const parsed = JSON.parse(content);
+          return {
+            recommendations: parsed.recommendations,
+            memberLunches: lunches.map(l => ({ name: l.userName, dish: l.dishName, category: l.category })),
+          };
+        } catch (error) {
+          console.error("Failed to get group recommendations:", error);
+          return {
+            recommendations: [
+              { name: "焼き魚定食", category: "japanese", reason: "バランスの良い和食でヘルシーです" },
+              { name: "野菜たっぷりスープ", category: "western", reason: "野菜をしっかり摂れます" },
+              { name: "豆腐ハンバーグ", category: "japanese", reason: "タンパク質を補給できます" },
+            ],
+            memberLunches: lunches.map(l => ({ name: l.userName, dish: l.dishName, category: l.category })),
+          };
+        }
+      }),
+  }),
+
+  // Group management
+  groups: router({
+    // Create a new group
+    create: protectedProcedure
+      .input(
+        z.object({
+          name: z.string().min(1).max(100),
+          description: z.string().max(500).optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const id = await db.createGroup(input.name, input.description || null, ctx.user.id);
+        const group = await db.getGroupById(id);
+        return group;
+      }),
+
+    // Get user's groups
+    myGroups: protectedProcedure.query(async ({ ctx }) => {
+      return db.getUserGroups(ctx.user.id);
+    }),
+
+    // Get group details
+    getById: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input }) => {
+        return db.getGroupById(input.id);
+      }),
+
+    // Get group members
+    getMembers: protectedProcedure
+      .input(z.object({ groupId: z.number() }))
+      .query(async ({ input }) => {
+        return db.getGroupMembers(input.groupId);
+      }),
+
+    // Join a group by invite code
+    join: protectedProcedure
+      .input(z.object({ inviteCode: z.string().length(8) }))
+      .mutation(async ({ ctx, input }) => {
+        const group = await db.getGroupByInviteCode(input.inviteCode);
+        if (!group) {
+          throw new Error("Invalid invite code");
+        }
+        await db.joinGroup(group.id, ctx.user.id);
+        return group;
+      }),
+
+    // Leave a group
+    leave: protectedProcedure
+      .input(z.object({ groupId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        await db.leaveGroup(input.groupId, ctx.user.id);
+        return { success: true };
+      }),
+
+    // Delete a group (owner only)
+    delete: protectedProcedure
+      .input(z.object({ groupId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        await db.deleteGroup(input.groupId, ctx.user.id);
+        return { success: true };
+      }),
+
+    // Get group meals for a date
+    getMealsForDate: protectedProcedure
+      .input(
+        z.object({
+          groupId: z.number(),
+          date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        })
+      )
+      .query(async ({ input }) => {
+        return db.getGroupMealsForDate(input.groupId, input.date);
+      }),
+  }),
+
+  // User settings
+  settings: router({
+    // Get notification settings
+    getNotificationSettings: protectedProcedure.query(async ({ ctx }) => {
+      return {
+        enabled: ctx.user.notificationEnabled ?? true,
+        lunchReminderTime: ctx.user.lunchReminderTime ?? "12:00",
+      };
+    }),
+
+    // Update notification settings
+    updateNotificationSettings: protectedProcedure
+      .input(
+        z.object({
+          enabled: z.boolean(),
+          lunchReminderTime: z.string().regex(/^\d{2}:\d{2}$/),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        await db.updateUserNotificationSettings(ctx.user.id, input.enabled, input.lunchReminderTime);
+        return { success: true };
       }),
   }),
 });

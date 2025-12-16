@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, boolean } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -20,6 +20,9 @@ export const users = mysqlTable("users", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
+  // Notification settings
+  notificationEnabled: boolean("notificationEnabled").default(true),
+  lunchReminderTime: varchar("lunchReminderTime", { length: 5 }).default("12:00"), // HH:MM format
 });
 
 export type User = typeof users.$inferSelect;
@@ -31,6 +34,7 @@ export type InsertUser = typeof users.$inferInsert;
 export const mealRecords = mysqlTable("meal_records", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
+  groupId: int("groupId"), // Optional group association
   date: varchar("date", { length: 10 }).notNull(), // YYYY-MM-DD format
   mealType: mysqlEnum("mealType", ["lunch", "dinner"]).notNull(),
   dishName: varchar("dishName", { length: 255 }).notNull(),
@@ -43,3 +47,33 @@ export const mealRecords = mysqlTable("meal_records", {
 
 export type MealRecord = typeof mealRecords.$inferSelect;
 export type InsertMealRecord = typeof mealRecords.$inferInsert;
+
+/**
+ * Groups table - family/group management
+ */
+export const groups = mysqlTable("groups", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  description: text("description"),
+  inviteCode: varchar("inviteCode", { length: 8 }).notNull().unique(),
+  ownerId: int("ownerId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Group = typeof groups.$inferSelect;
+export type InsertGroup = typeof groups.$inferInsert;
+
+/**
+ * Group members table - relationship between users and groups
+ */
+export const groupMembers = mysqlTable("group_members", {
+  id: int("id").autoincrement().primaryKey(),
+  groupId: int("groupId").notNull(),
+  userId: int("userId").notNull(),
+  role: mysqlEnum("role", ["owner", "member"]).default("member").notNull(),
+  joinedAt: timestamp("joinedAt").defaultNow().notNull(),
+});
+
+export type GroupMember = typeof groupMembers.$inferSelect;
+export type InsertGroupMember = typeof groupMembers.$inferInsert;

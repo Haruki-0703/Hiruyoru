@@ -11,6 +11,8 @@ import { Colors, Spacing, BorderRadius } from "@/constants/theme";
 import { useAuth } from "@/hooks/use-auth";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 
+type AuthStep = "idle" | "connecting" | "authenticating" | "completing" | "success" | "error";
+
 export default function ModalScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -18,17 +20,57 @@ export default function ModalScreen() {
   const colors = Colors[colorScheme];
   const { isAuthenticated, loading, logout, user } = useAuth();
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [authStep, setAuthStep] = useState<AuthStep>("idle");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const getStepMessage = (step: AuthStep): string => {
+    switch (step) {
+      case "connecting":
+        return "認証サーバーに接続中...";
+      case "authenticating":
+        return "認証情報を確認中...";
+      case "completing":
+        return "ログイン処理を完了中...";
+      case "success":
+        return "ログイン成功！";
+      case "error":
+        return errorMessage || "エラーが発生しました";
+      default:
+        return "";
+    }
+  };
+
+  const getErrorUserMessage = (error: string): string => {
+    if (error.includes("network") || error.includes("Network")) {
+      return "ネットワーク接続を確認してください。Wi-Fiまたはモバイルデータが有効か確認してください。";
+    }
+    if (error.includes("cancel") || error.includes("Cancel")) {
+      return "ログインがキャンセルされました。もう一度お試しください。";
+    }
+    if (error.includes("timeout") || error.includes("Timeout")) {
+      return "接続がタイムアウトしました。しばらく待ってから再度お試しください。";
+    }
+    if (error.includes("invalid") || error.includes("Invalid")) {
+      return "認証情報が無効です。再度ログインしてください。";
+    }
+    return "予期せぬエラーが発生しました。しばらく待ってから再度お試しください。";
+  };
 
   const handleLogin = async () => {
     try {
       setIsLoggingIn(true);
+      setAuthStep("connecting");
+      setErrorMessage(null);
+      
       const loginUrl = getLoginUrl();
 
       if (Platform.OS === "web") {
+        setAuthStep("authenticating");
         window.location.href = loginUrl;
         return;
       }
 
+      setAuthStep("authenticating");
       const result = await WebBrowser.openAuthSessionAsync(
         loginUrl,
         undefined,
@@ -38,7 +80,15 @@ export default function ModalScreen() {
         }
       );
 
+      if (result.type === "cancel") {
+        setAuthStep("error");
+        setErrorMessage("ログインがキャンセルされました。");
+        return;
+      }
+
       if (result.type === "success" && result.url) {
+        setAuthStep("completing");
+        
         let url: URL;
         if (result.url.startsWith("exp://") || result.url.startsWith("exps://")) {
           const urlStr = result.url.replace(/^exp(s)?:\/\//, "http://");
@@ -52,22 +102,44 @@ export default function ModalScreen() {
         const error = url.searchParams.get("error");
 
         if (error) {
-          console.error("[Auth] OAuth error:", error);
+          setAuthStep("error");
+          setErrorMessage(getErrorUserMessage(error));
           return;
         }
 
         if (code && state) {
-          router.push({
-            pathname: "/oauth/callback" as any,
-            params: { code, state },
-          });
+          setAuthStep("success");
+          setTimeout(() => {
+            router.push({
+              pathname: "/oauth/callback" as any,
+              params: { code, state },
+            });
+          }, 500);
+        } else {
+          setAuthStep("error");
+          setErrorMessage("認証情報の取得に失敗しました。再度お試しください。");
         }
       }
     } catch (error) {
       console.error("[Auth] Login error:", error);
+      setAuthStep("error");
+      setErrorMessage(getErrorUserMessage(String(error)));
     } finally {
-      setIsLoggingIn(false);
+      if (authStep !== "success") {
+        setTimeout(() => {
+          setIsLoggingIn(false);
+          if (authStep === "error") {
+            setTimeout(() => setAuthStep("idle"), 3000);
+          }
+        }, 1000);
+      }
     }
+  };
+
+  const handleRetry = () => {
+    setAuthStep("idle");
+    setErrorMessage(null);
+    setIsLoggingIn(false);
   };
 
   if (loading) {
@@ -175,6 +247,45 @@ export default function ModalScreen() {
             アカウントを作成して{"\n"}すべての機能を使いましょう
           </ThemedText>
 
+          {/* Auth Step Indicator */}
+          {authStep !== "idle" && (
+            <View style={[styles.stepIndicator, { backgroundColor: authStep === "error" ? colors.errorLight : colors.card }]}>
+              <View style={styles.stepRow}>
+                {authStep === "error" ? (
+                  <ThemedText style={[styles.stepIcon, { color: colors.error }]}>⚠️</ThemedText>
+                ) : authStep === "success" ? (
+                  <ThemedText style={[styles.stepIcon, { color: colors.success }]}>✓</ThemedText>
+                ) : (
+                  <ActivityIndicator size="small" color={colors.tint} />
+                )}
+                <ThemedText style={[
+                  styles.stepText,
+                  authStep === "error" && { color: colors.error },
+                  authStep === "success" && { color: colors.success },
+                ]}>
+                  {getStepMessage(authStep)}
+                </ThemedText>
+              </View>
+              
+              {/* Progress dots */}
+              {authStep !== "error" && (
+                <View style={styles.progressDots}>
+                  <View style={[styles.dot, { backgroundColor: colors.tint }]} />
+                  <View style={[styles.dot, { backgroundColor: ["authenticating", "completing", "success"].includes(authStep) ? colors.tint : colors.border }]} />
+                  <View style={[styles.dot, { backgroundColor: ["completing", "success"].includes(authStep) ? colors.tint : colors.border }]} />
+                  <View style={[styles.dot, { backgroundColor: authStep === "success" ? colors.tint : colors.border }]} />
+                </View>
+              )}
+
+              {/* Retry button for errors */}
+              {authStep === "error" && (
+                <Pressable style={[styles.retryButton, { borderColor: colors.error }]} onPress={handleRetry}>
+                  <ThemedText style={[styles.retryText, { color: colors.error }]}>再試行</ThemedText>
+                </Pressable>
+              )}
+            </View>
+          )}
+
           {/* Feature comparison */}
           <View style={[styles.comparisonCard, { backgroundColor: colors.card }]}>
             <View style={styles.comparisonHeader}>
@@ -207,6 +318,11 @@ export default function ModalScreen() {
             </View>
             <View style={[styles.comparisonRow, { borderTopColor: colors.border }]}>
               <ThemedText style={styles.comparisonFeature}>クラウド同期</ThemedText>
+              <ThemedText style={[styles.comparisonX, { color: colors.textDisabled }]}>✕</ThemedText>
+              <ThemedText style={[styles.comparisonCheck, { color: colors.tint }]}>✓</ThemedText>
+            </View>
+            <View style={[styles.comparisonRow, { borderTopColor: colors.border }]}>
+              <ThemedText style={styles.comparisonFeature}>グループ機能</ThemedText>
               <ThemedText style={[styles.comparisonX, { color: colors.textDisabled }]}>✕</ThemedText>
               <ThemedText style={[styles.comparisonCheck, { color: colors.tint }]}>✓</ThemedText>
             </View>
@@ -268,17 +384,20 @@ export default function ModalScreen() {
               {isLoggingIn ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <ThemedText style={styles.emailText}>メールアドレスで続ける</ThemedText>
+                <>
+                  <ThemedText style={styles.emailIcon}>✉️</ThemedText>
+                  <ThemedText style={styles.emailText}>メールでログイン</ThemedText>
+                </>
               )}
             </Pressable>
           </View>
 
-          <ThemedText style={[styles.termsText, { color: colors.textSecondary }]}>
-            ログインすることで、利用規約とプライバシーポリシーに同意したことになります
+          <ThemedText style={[styles.terms, { color: colors.textSecondary }]}>
+            ログインすることで、利用規約とプライバシーポリシーに同意したものとみなされます。
           </ThemedText>
 
-          <Pressable style={styles.skipButton} onPress={() => router.back()}>
-            <ThemedText style={[styles.skipText, { color: colors.textSecondary }]}>
+          <Pressable style={styles.backButton} onPress={() => router.back()}>
+            <ThemedText style={[styles.backText, { color: colors.textSecondary }]}>
               ゲストとして続ける
             </ThemedText>
           </Pressable>
@@ -294,15 +413,16 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    justifyContent: "center",
   },
   content: {
+    flex: 1,
     alignItems: "center",
-    paddingHorizontal: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.xl,
   },
   emoji: {
     fontSize: 64,
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.md,
   },
   title: {
     textAlign: "center",
@@ -312,78 +432,53 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 24,
     textAlign: "center",
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.xl,
   },
-  avatarContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: Spacing.lg,
-  },
-  avatarText: {
-    fontSize: 32,
-    fontWeight: "bold",
-    color: "#FFFFFF",
-  },
-  infoCard: {
+  stepIndicator: {
     width: "100%",
-    borderRadius: BorderRadius.lg,
     padding: Spacing.md,
+    borderRadius: BorderRadius.md,
     marginBottom: Spacing.lg,
+    alignItems: "center",
   },
-  infoRow: {
+  stepRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: Spacing.sm,
-  },
-  infoLabel: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  infoValue: {
-    fontSize: 14,
-    fontWeight: "500",
-    lineHeight: 20,
-  },
-  divider: {
-    height: 1,
-  },
-  featureCard: {
-    width: "100%",
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.md,
-    marginBottom: Spacing.lg,
-  },
-  featureTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    lineHeight: 22,
-    marginBottom: Spacing.md,
-  },
-  featureList: {
     gap: Spacing.sm,
   },
-  featureItem: {
-    flexDirection: "row",
-    alignItems: "center",
+  stepIcon: {
+    fontSize: 20,
   },
-  featureCheck: {
-    fontSize: 16,
-    color: "#34C759",
-    marginRight: Spacing.sm,
-  },
-  featureText: {
+  stepText: {
     fontSize: 14,
     lineHeight: 20,
+  },
+  progressDots: {
+    flexDirection: "row",
+    gap: Spacing.xs,
+    marginTop: Spacing.sm,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  retryButton: {
+    marginTop: Spacing.md,
+    paddingVertical: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+    borderWidth: 1,
+    borderRadius: BorderRadius.sm,
+  },
+  retryText: {
+    fontSize: 14,
+    fontWeight: "600",
   },
   comparisonCard: {
     width: "100%",
-    borderRadius: BorderRadius.lg,
+    borderRadius: BorderRadius.md,
     padding: Spacing.md,
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.xl,
   },
   comparisonHeader: {
     flexDirection: "row",
@@ -397,7 +492,6 @@ const styles = StyleSheet.create({
   comparisonTitle: {
     fontSize: 12,
     fontWeight: "600",
-    lineHeight: 16,
   },
   comparisonRow: {
     flexDirection: "row",
@@ -408,13 +502,11 @@ const styles = StyleSheet.create({
   comparisonFeature: {
     flex: 1,
     fontSize: 14,
-    lineHeight: 20,
   },
   comparisonCheck: {
     width: 70,
     textAlign: "center",
     fontSize: 16,
-    color: "#34C759",
   },
   comparisonX: {
     width: 70,
@@ -423,7 +515,7 @@ const styles = StyleSheet.create({
   },
   loginButtons: {
     width: "100%",
-    gap: Spacing.sm,
+    gap: Spacing.md,
     marginBottom: Spacing.lg,
   },
   googleButton: {
@@ -436,7 +528,7 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   googleIcon: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: "bold",
     color: "#4285F4",
   },
@@ -444,7 +536,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     color: "#000000",
-    lineHeight: 24,
   },
   appleButton: {
     flexDirection: "row",
@@ -455,60 +546,115 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   appleIcon: {
-    fontSize: 18,
-    fontWeight: "bold",
+    fontSize: 20,
   },
   appleText: {
     fontSize: 16,
     fontWeight: "600",
-    lineHeight: 24,
   },
   emailButton: {
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: Spacing.md,
     borderRadius: BorderRadius.md,
+    gap: Spacing.sm,
+  },
+  emailIcon: {
+    fontSize: 18,
   },
   emailText: {
     fontSize: 16,
     fontWeight: "600",
     color: "#FFFFFF",
-    lineHeight: 24,
   },
   buttonDisabled: {
     opacity: 0.6,
   },
-  termsText: {
+  terms: {
     fontSize: 12,
     lineHeight: 18,
     textAlign: "center",
     marginBottom: Spacing.lg,
   },
-  skipButton: {
-    padding: Spacing.md,
+  backButton: {
+    paddingVertical: Spacing.md,
   },
-  skipText: {
+  backText: {
+    fontSize: 16,
+  },
+  avatarContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: Spacing.md,
+  },
+  avatarText: {
+    fontSize: 32,
+    fontWeight: "bold",
+    color: "#FFFFFF",
+  },
+  infoCard: {
+    width: "100%",
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.lg,
+  },
+  infoRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: Spacing.sm,
+  },
+  infoLabel: {
     fontSize: 14,
-    lineHeight: 20,
+  },
+  infoValue: {
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  divider: {
+    height: 1,
+    width: "100%",
+  },
+  featureCard: {
+    width: "100%",
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.xl,
+  },
+  featureTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    marginBottom: Spacing.md,
+  },
+  featureList: {
+    gap: Spacing.sm,
+  },
+  featureItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+  },
+  featureCheck: {
+    fontSize: 16,
+    color: "#34C759",
+  },
+  featureText: {
+    fontSize: 14,
   },
   logoutButton: {
     width: "100%",
     paddingVertical: Spacing.md,
     borderRadius: BorderRadius.md,
-    borderWidth: 2,
+    borderWidth: 1,
     alignItems: "center",
     marginBottom: Spacing.md,
   },
   logoutText: {
     fontSize: 16,
     fontWeight: "600",
-    lineHeight: 24,
-  },
-  backButton: {
-    padding: Spacing.md,
-  },
-  backText: {
-    fontSize: 14,
-    lineHeight: 20,
   },
 });
