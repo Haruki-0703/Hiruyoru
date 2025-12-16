@@ -29,8 +29,16 @@ function createAuthContext(): { ctx: TrpcContext; clearedCookies: CookieCall[] }
     user,
     req: {
       protocol: "https",
-      headers: {},
-    } as TrpcContext["req"],
+      hostname: "localhost",
+      headers: {
+        host: "localhost:3000",
+        "x-forwarded-proto": "https",
+      },
+      get: (name: string) => {
+        if (name === "host") return "localhost:3000";
+        return undefined;
+      },
+    } as unknown as TrpcContext["req"],
     res: {
       clearCookie: (name: string, options: Record<string, unknown>) => {
         clearedCookies.push({ name, options });
