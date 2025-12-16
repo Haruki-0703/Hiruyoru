@@ -1,0 +1,1 @@
+ALTER TABLE `meal_records` ADD `imageUrl` text;
