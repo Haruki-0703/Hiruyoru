@@ -111,10 +111,15 @@ export function useLocalMeals() {
     [meals, saveMeals]
   );
 
-  // Refresh data
-  const refresh = useCallback(() => {
-    loadMeals();
-  }, [loadMeals]);
+  // Clear all meals
+  const clearMeals = useCallback(async () => {
+    try {
+      await AsyncStorage.removeItem(STORAGE_KEY);
+      setMeals([]);
+    } catch (error) {
+      console.error("Failed to clear meals:", error);
+    }
+  }, []);
 
   return {
     meals,
@@ -126,6 +131,7 @@ export function useLocalMeals() {
     getRecentMeals,
     getMealsByDateRange,
     deleteMeal,
-    refresh,
+    clearMeals,
+    refresh: loadMeals,
   };
 }

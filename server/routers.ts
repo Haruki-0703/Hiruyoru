@@ -88,6 +88,43 @@ export const appRouter = router({
         await db.deleteMealRecord(input.id, ctx.user.id);
         return { success: true };
       }),
+
+    // Sync local meals to server (for guest to authenticated user migration)
+    syncLocalMeals: protectedProcedure
+      .input(
+        z.array(
+          z.object({
+            date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+            mealType: z.enum(["lunch", "dinner"]),
+            dishName: z.string().min(1).max(255),
+            category: z.enum(["japanese", "western", "chinese", "other"]),
+            note: z.string().max(500).optional(),
+            createdAt: z.string(),
+          })
+        )
+      )
+      .mutation(async ({ ctx, input }) => {
+        const results = [];
+        for (const meal of input) {
+          try {
+            const id = await db.createMealRecord({
+              userId: ctx.user.id,
+              groupId: null,
+              date: meal.date,
+              mealType: meal.mealType,
+              dishName: meal.dishName,
+              category: meal.category,
+              note: meal.note || null,
+              imageUrl: null,
+            });
+            results.push({ success: true, id, originalCreatedAt: meal.createdAt });
+          } catch (error) {
+            console.error("Failed to sync meal:", meal, error);
+            results.push({ success: false, error: String(error), originalCreatedAt: meal.createdAt });
+          }
+        }
+        return results;
+      }),
   }),
 
   // Image analysis for food photos

@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -56,7 +56,7 @@ export default function RecommendScreen() {
   const [isSelecting, setIsSelecting] = useState(false);
   const [todayDate] = useState(getTodayDate());
 
-  const { data: todayMeals, refetch: refetchMeals } = trpc.meals.getByDate.useQuery(
+  const { data: todayMeals } = trpc.meals.getByDate.useQuery(
     { date: todayDate },
     { enabled: isAuthenticated }
   );
@@ -73,13 +73,7 @@ export default function RecommendScreen() {
   const todayLunch = todayMeals?.find((m) => m.mealType === "lunch");
   const todayDinner = todayMeals?.find((m) => m.mealType === "dinner");
 
-  useEffect(() => {
-    if (todayLunch && !todayDinner && recommendations.length === 0) {
-      fetchRecommendations();
-    }
-  }, [todayLunch, todayDinner]);
-
-  const fetchRecommendations = async () => {
+  const fetchRecommendations = useCallback(async () => {
     if (!todayLunch) return;
 
     setIsLoading(true);
@@ -95,7 +89,13 @@ export default function RecommendScreen() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [todayLunch, getRecommendationsMutation]);
+
+  useEffect(() => {
+    if (todayLunch && !todayDinner && recommendations.length === 0) {
+      fetchRecommendations();
+    }
+  }, [todayLunch, todayDinner, fetchRecommendations, recommendations.length]);
 
   const handleSelectDinner = async (recommendation: Recommendation) => {
     setIsSelecting(true);

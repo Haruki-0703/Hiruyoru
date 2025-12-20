@@ -15,7 +15,7 @@ describe("Guest User Flow", () => {
 
   it("should allow recording lunch as guest", async () => {
     // Navigate to record tab
-    await element(by.id("record-tab")).multiTap();
+    await element(by.id("record-tab")).multiTap(1);
     
     // Wait for record screen to appear
     await waitFor(element(by.text("ランチを記録する")))
@@ -26,10 +26,10 @@ describe("Guest User Flow", () => {
     await element(by.id("dish-name-input")).typeText("カレーライス");
 
     // Select category
-    await element(by.id("category-japanese")).multiTap();
+    await element(by.id("category-japanese")).multiTap(1);
 
     // Submit
-    await element(by.id("submit-button")).multiTap();
+    await element(by.id("submit-button")).multiTap(1);
 
     // Verify success message
     await expect(element(by.text("記録しました"))).toBeVisible();
@@ -37,7 +37,7 @@ describe("Guest User Flow", () => {
 
   it("should display recorded meal in history", async () => {
     // Navigate to history tab
-    await element(by.id("history-tab")).multiTap();
+    await element(by.id("history-tab")).multiTap(1);
 
     // Verify the recorded meal appears
     await expect(element(by.text("カレーライス"))).toBeVisible();
@@ -45,7 +45,7 @@ describe("Guest User Flow", () => {
 
   it("should show login prompt on recommendations tab", async () => {
     // Navigate to recommendations tab
-    await element(by.id("recommend-tab")).multiTap();
+    await element(by.id("recommend-tab")).multiTap(1);
 
     // Verify login prompt is shown
     await expect(element(by.text("ログインするとAIおすすめ機能が使えます"))).toBeVisible();

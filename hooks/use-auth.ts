@@ -2,6 +2,8 @@ import * as Api from "@/lib/api";
 import * as Auth from "@/lib/auth";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Platform } from "react-native";
+import { trpc } from "@/lib/trpc";
+import { useLocalMeals } from "@/hooks/use-local-meals";
 
 type UseAuthOptions = {
   autoFetch?: boolean;
@@ -12,6 +14,8 @@ export function useAuth(options?: UseAuthOptions) {
   const [user, setUser] = useState<Auth.User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const { meals: localMeals, clearMeals } = useLocalMeals();
+  const syncMutation = trpc.meals.syncLocalMeals.useMutation();
 
   const fetchUser = useCallback(async () => {
     console.log("[useAuth] fetchUser called");
@@ -57,6 +61,21 @@ export function useAuth(options?: UseAuthOptions) {
           // Cache user info in localStorage for faster subsequent loads
           await Auth.setUserInfo(userInfo);
           console.log("[useAuth] Web user set from API:", userInfo);
+
+          // Sync local meals to server if any exist
+          if (localMeals.length > 0) {
+            console.log("[useAuth] Syncing local meals to server:", localMeals.length);
+            try {
+              const syncResult = await syncMutation.mutateAsync(localMeals);
+              console.log("[useAuth] Sync result:", syncResult);
+              // Clear local meals after successful sync
+              await clearMeals();
+              console.log("[useAuth] Local meals cleared after sync");
+            } catch (syncError) {
+              console.error("[useAuth] Failed to sync local meals:", syncError);
+              // Don't fail the login if sync fails
+            }
+          }
         } else {
           console.log("[useAuth] Web: No authenticated user from API");
           setUser(null);
@@ -87,6 +106,21 @@ export function useAuth(options?: UseAuthOptions) {
       if (cachedUser) {
         console.log("[useAuth] Using cached user info");
         setUser(cachedUser);
+
+        // Sync local meals to server if any exist
+        if (localMeals.length > 0) {
+          console.log("[useAuth] Syncing local meals to server:", localMeals.length);
+          try {
+            const syncResult = await syncMutation.mutateAsync(localMeals);
+            console.log("[useAuth] Sync result:", syncResult);
+            // Clear local meals after successful sync
+            await clearMeals();
+            console.log("[useAuth] Local meals cleared after sync");
+          } catch (syncError) {
+            console.error("[useAuth] Failed to sync local meals:", syncError);
+            // Don't fail the login if sync fails
+          }
+        }
       } else {
         console.log("[useAuth] No cached user, setting user to null");
         setUser(null);
