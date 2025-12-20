@@ -63,12 +63,34 @@ export default function RecommendScreen() {
 
   const utils = trpc.useUtils();
   const getRecommendationsMutation = trpc.recommendations.getDinnerRecommendations.useMutation();
-  const createMealMutation = trpc.meals.create.useMutation({
-    onSuccess: () => {
-      utils.meals.getByDate.invalidate();
-      utils.meals.getRecent.invalidate();
-    },
-  });
+  const generateShoppingListMutation = trpc.shoppingList.generateFromDinner.useMutation();
+  const createMealMutation = trpc.meals.create.useMutation();
+
+  const showShoppingList = async (recommendation: Recommendation) => {
+    try {
+      const result = await generateShoppingListMutation.mutateAsync({
+        dinnerName: recommendation.name,
+        dinnerCategory: recommendation.category,
+      });
+
+      if (result.ingredients && result.ingredients.length > 0) {
+        const ingredientList = result.ingredients
+          .map((ing: { name: string; amount: string }) => `• ${ing.name} (${ing.amount})`)
+          .join('\n');
+
+        Alert.alert(
+          `${recommendation.name}の買い物リスト`,
+          ingredientList,
+          [{ text: "閉じる" }]
+        );
+      } else {
+        Alert.alert("買い物リスト", "買い物リストの生成に失敗しました。");
+      }
+    } catch (error) {
+      console.error("Failed to generate shopping list:", error);
+      Alert.alert("エラー", "買い物リストの生成に失敗しました");
+    }
+  };
 
   const todayLunch = todayMeals?.find((m) => m.mealType === "lunch");
   const todayDinner = todayMeals?.find((m) => m.mealType === "dinner");
@@ -107,9 +129,16 @@ export default function RecommendScreen() {
         category: recommendation.category,
         note: `おすすめから選択: ${recommendation.reason}`,
       });
-      Alert.alert("記録完了", `${recommendation.name}を今日のディナーに記録しました！`, [
-        { text: "OK", onPress: () => router.push("/(tabs)") },
-      ]);
+      // Invalidate queries to refresh data
+      await utils.meals.getByDate.invalidate();
+      Alert.alert(
+        "記録完了",
+        `${recommendation.name}を今日のディナーに記録しました！`,
+        [
+          { text: "買い物リストを見る", onPress: () => showShoppingList(recommendation) },
+          { text: "OK", onPress: () => router.push("/(tabs)") },
+        ]
+      );
     } catch (error) {
       console.error("Failed to record dinner:", error);
       Alert.alert("エラー", "記録に失敗しました");

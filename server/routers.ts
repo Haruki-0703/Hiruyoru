@@ -435,6 +435,89 @@ ${lunchSummary}
       }),
   }),
 
+  // Shopping list generation from dinner recommendations
+  shoppingList: router({
+    generateFromDinner: protectedProcedure
+      .input(
+        z.object({
+          dinnerName: z.string(),
+          dinnerCategory: z.enum(["japanese", "western", "chinese", "other"]),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const categoryNames: Record<string, string> = {
+          japanese: "和食",
+          western: "洋食",
+          chinese: "中華",
+          other: "その他",
+        };
+
+        const prompt = `あなたは料理の専門家です。以下のディナー料理を作るために必要な食材リストを作成してください。
+
+ディナー料理:
+- 料理名: ${input.dinnerName}
+- カテゴリ: ${categoryNames[input.dinnerCategory]}
+
+以下の点を考慮してください:
+1. 一般的な日本の家庭で手に入りやすい食材
+2. 2-4人分の分量
+3. 基本的な調味料（塩、醤油、油など）は除外
+4. 具体的な食材名と目安の量を記載
+
+必ず以下のJSON形式で回答してください:
+{
+  "ingredients": [
+    {
+      "name": "食材名",
+      "amount": "量（例: 200g, 1個, 大さじ1）",
+      "category": "野菜/肉/魚/乳製品/その他"
+    }
+  ]
+}`;
+
+        try {
+          const response = await invokeLLM({
+            messages: [
+              {
+                role: "system",
+                content: "あなたは料理の専門家です。料理名から必要な食材を正確に推定し、JSON形式で返してください。",
+              },
+              {
+                role: "user",
+                content: prompt,
+              },
+            ],
+            response_format: { type: "json_object" },
+          });
+
+          const content = response.choices[0]?.message?.content;
+          if (!content || typeof content !== "string") {
+            throw new Error("No response from LLM");
+          }
+
+          let parsed;
+          try {
+            parsed = JSON.parse(content);
+          } catch (parseError) {
+            console.error("Failed to parse LLM response:", parseError);
+            throw new Error("Invalid JSON response from LLM");
+          }
+
+          return {
+            dinnerName: input.dinnerName,
+            ingredients: parsed.ingredients || [],
+          };
+        } catch (error) {
+          console.error("Failed to generate shopping list:", error);
+          return {
+            dinnerName: input.dinnerName,
+            ingredients: [],
+            error: "買い物リストの生成に失敗しました",
+          };
+        }
+      }),
+  }),
+
   // Group management
   groups: router({
     // Create a new group
@@ -532,6 +615,179 @@ ${lunchSummary}
       .mutation(async ({ ctx, input }) => {
         await db.updateUserNotificationSettings(ctx.user.id, input.enabled, input.lunchReminderTime);
         return { success: true };
+      }),
+  }),
+
+  // Weekly reports and analytics
+  reports: router({
+    getWeeklyReport: protectedProcedure
+      .input(
+        z.object({
+          weekStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        })
+      )
+      .query(async ({ ctx, input }) => {
+        const weekEndDate = new Date(input.weekStartDate);
+        weekEndDate.setDate(weekEndDate.getDate() + 6);
+        const endDateStr = weekEndDate.toISOString().split('T')[0];
+
+        const meals = await db.getMealsByDateRange(ctx.user.id, input.weekStartDate, endDateStr);
+
+        // Calculate statistics
+        const totalMeals = meals.length;
+        const lunches = meals.filter(m => m.mealType === 'lunch');
+        const dinners = meals.filter(m => m.mealType === 'dinner');
+
+        const categoryStats = {
+          japanese: meals.filter(m => m.category === 'japanese').length,
+          western: meals.filter(m => m.category === 'western').length,
+          chinese: meals.filter(m => m.category === 'chinese').length,
+          other: meals.filter(m => m.category === 'other').length,
+        };
+
+        // Daily meal completion rate (lunch + dinner per day for 7 days = 14 meals max)
+        const dailyMeals: Record<string, { lunch: boolean; dinner: boolean }> = {};
+        for (let i = 0; i < 7; i++) {
+          const date = new Date(input.weekStartDate);
+          date.setDate(date.getDate() + i);
+          const dateStr = date.toISOString().split('T')[0];
+          dailyMeals[dateStr] = { lunch: false, dinner: false };
+        }
+
+        meals.forEach(meal => {
+          if (dailyMeals[meal.date]) {
+            dailyMeals[meal.date][meal.mealType] = true;
+          }
+        });
+
+        const completedDays = Object.values(dailyMeals).filter(day => day.lunch && day.dinner).length;
+        const completionRate = Math.round((completedDays / 7) * 100);
+
+        return {
+          weekStartDate: input.weekStartDate,
+          weekEndDate: endDateStr,
+          totalMeals,
+          lunches: lunches.length,
+          dinners: dinners.length,
+          categoryStats,
+          dailyMeals,
+          completionRate,
+          meals: meals.map(m => ({
+            id: m.id,
+            date: m.date,
+            mealType: m.mealType,
+            dishName: m.dishName,
+            category: m.category,
+            note: m.note,
+          })),
+        };
+      }),
+
+    getNutritionAdvice: protectedProcedure
+      .input(
+        z.object({
+          weekStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        })
+      )
+      .query(async ({ ctx, input }) => {
+        const weekEndDate = new Date(input.weekStartDate);
+        weekEndDate.setDate(weekEndDate.getDate() + 6);
+        const endDateStr = weekEndDate.toISOString().split('T')[0];
+
+        const meals = await db.getMealsByDateRange(ctx.user.id, input.weekStartDate, endDateStr);
+
+        if (meals.length === 0) {
+          return {
+            advice: "今週の食事記録がありません。バランスの良い食事を心がけましょう。",
+            recommendations: [],
+          };
+        }
+
+        // Prepare meal summary for LLM
+        const mealSummary = meals.map(m =>
+          `${m.date} ${m.mealType === 'lunch' ? 'ランチ' : 'ディナー'}: ${m.dishName} (${m.category})`
+        ).join('\n');
+
+        const categoryCount = {
+          japanese: meals.filter(m => m.category === 'japanese').length,
+          western: meals.filter(m => m.category === 'western').length,
+          chinese: meals.filter(m => m.category === 'chinese').length,
+          other: meals.filter(m => m.category === 'other').length,
+        };
+
+        const prompt = `あなたは栄養士です。以下の1週間の食事記録に基づいて、栄養バランスの分析と改善アドバイスを提供してください。
+
+食事記録:
+${mealSummary}
+
+カテゴリ別食事数:
+- 和食: ${categoryCount.japanese}回
+- 洋食: ${categoryCount.western}回
+- 中華: ${categoryCount.chinese}回
+- その他: ${categoryCount.other}回
+
+以下の点を考慮して分析してください:
+1. 栄養バランス（タンパク質、炭水化物、脂質、ビタミン、ミネラル）
+2. 食事の多様性
+3. 健康的な食事習慣
+4. 具体的な改善提案
+
+必ず以下のJSON形式で回答してください:
+{
+  "analysis": "全体的な分析（200文字以内）",
+  "recommendations": [
+    "具体的な改善アドバイス1",
+    "具体的な改善アドバイス2",
+    "具体的な改善アドバイス3"
+  ],
+  "nutritionScore": 数値（0-100、現在の栄養バランスの評価）
+}`;
+
+        try {
+          const response = await invokeLLM({
+            messages: [
+              {
+                role: "system",
+                content: "あなたは経験豊富な栄養士です。食事記録から栄養バランスを分析し、建設的なアドバイスを提供してください。",
+              },
+              {
+                role: "user",
+                content: prompt,
+              },
+            ],
+            response_format: { type: "json_object" },
+          });
+
+          const content = response.choices[0]?.message?.content;
+          if (!content || typeof content !== "string") {
+            throw new Error("No response from LLM");
+          }
+
+          let parsed;
+          try {
+            parsed = JSON.parse(content);
+          } catch (parseError) {
+            console.error("Failed to parse LLM response:", parseError);
+            throw new Error("Invalid JSON response from LLM");
+          }
+
+          return {
+            analysis: parsed.analysis || "分析できませんでした",
+            recommendations: parsed.recommendations || [],
+            nutritionScore: parsed.nutritionScore || 50,
+          };
+        } catch (error) {
+          console.error("Failed to get nutrition advice:", error);
+          return {
+            analysis: "栄養アドバイスの生成に失敗しました。引き続きバランスの良い食事を心がけてください。",
+            recommendations: [
+              "野菜を積極的に摂取しましょう",
+              "タンパク質をバランスよく取りましょう",
+              "食事の時間を一定に保ちましょう",
+            ],
+            nutritionScore: 50,
+          };
+        }
       }),
   }),
 });
