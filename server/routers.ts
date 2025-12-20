@@ -189,7 +189,14 @@ export const appRouter = router({
             throw new Error("No response from LLM");
           }
 
-          const parsed = JSON.parse(content);
+          let parsed;
+          try {
+            parsed = JSON.parse(content);
+          } catch (parseError) {
+            console.error("Failed to parse LLM response:", parseError);
+            throw new Error("Invalid JSON response from LLM");
+          }
+
           return {
             imageUrl,
             dishName: parsed.dishName || "不明な料理",
