@@ -2,7 +2,7 @@
 
 **Version 0.5.0** - 買い物リスト生成 & 週間レポート機能追加
 
-[![Changelog](https://img.shields.io/badge/CHANGELOG-View-blue)](CHANGELOG.md)
+[![Changelog](https://img.shields.io/badge/CHANGELOG-View-blue)](CHANGELOG.md) [![Contributing](https://img.shields.io/badge/CONTRIBUTING-Guide-green)](CONTRIBUTING.md)
 
 毎日のお昼ご飯を記録し、夜ご飯の献立を提案してくれるモバイルアプリです。
 
