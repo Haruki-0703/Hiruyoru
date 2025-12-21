@@ -49,13 +49,12 @@ export function getSessionCookieOptions(
 ): Pick<CookieOptions, "domain" | "httpOnly" | "path" | "sameSite" | "secure"> {
   const hostname = req.hostname;
   const domain = getParentDomain(hostname);
-  const secure = isSecureRequest(req);
 
   return {
     domain,
     httpOnly: true,
     path: "/",
-    sameSite: secure ? "none" : "lax",
-    secure,
+    sameSite: "none",
+    secure: isSecureRequest(req),
   };
 }

@@ -790,6 +790,163 @@ ${mealSummary}
         }
       }),
   }),
+
+  // v0.6: Favorite meals API
+  favorites: router({
+    // Get all favorite meals
+    list: protectedProcedure.query(async ({ ctx }) => {
+      return await db.getFavoriteMeals(ctx.user.id);
+    }),
+
+    // Add a meal to favorites
+    create: protectedProcedure
+      .input(
+        z.object({
+          dishName: z.string().min(1).max(255),
+          category: z.enum(["japanese", "western", "chinese", "other"]),
+          note: z.string().max(500).optional(),
+          imageUrl: z.string().url().optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const id = await db.createFavoriteMeal({
+          userId: ctx.user.id,
+          dishName: input.dishName,
+          category: input.category,
+          note: input.note || null,
+          imageUrl: input.imageUrl || null,
+        });
+        return { id };
+      }),
+
+    // Delete a favorite meal
+    delete: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        await db.deleteFavoriteMeal(input.id, ctx.user.id);
+        return { success: true };
+      }),
+
+    // Use a favorite meal (increment usage count)
+    use: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        await db.incrementFavoriteUsage(input.id, ctx.user.id);
+        return { success: true };
+      }),
+  }),
+
+  // v0.6: Pantry inventory API
+  pantry: router({
+    // Get all pantry items
+    list: protectedProcedure
+      .input(
+        z.object({
+          groupId: z.number().optional(),
+        })
+      )
+      .query(async ({ ctx, input }) => {
+        return await db.getPantryInventory(ctx.user.id, input.groupId);
+      }),
+
+    // Add a pantry item
+    create: protectedProcedure
+      .input(
+        z.object({
+          ingredientName: z.string().min(1).max(255),
+          quantity: z.string().max(50).optional(),
+          unit: z.string().max(20).optional(),
+          category: z.enum(["vegetable", "meat", "fish", "seasoning", "other"]),
+          expiryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+          lowStockAlert: z.boolean().optional(),
+          groupId: z.number().optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const id = await db.createPantryItem({
+          userId: ctx.user.id,
+          groupId: input.groupId || null,
+          ingredientName: input.ingredientName,
+          quantity: input.quantity || null,
+          unit: input.unit || null,
+          category: input.category,
+          expiryDate: input.expiryDate || null,
+          lowStockAlert: input.lowStockAlert || false,
+        });
+        return { id };
+      }),
+
+    // Update a pantry item
+    update: protectedProcedure
+      .input(
+        z.object({
+          id: z.number(),
+          quantity: z.string().max(50).optional(),
+          expiryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+          lowStockAlert: z.boolean().optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        await db.updatePantryItem(input.id, ctx.user.id, {
+          quantity: input.quantity,
+          expiryDate: input.expiryDate,
+          lowStockAlert: input.lowStockAlert,
+        });
+        return { success: true };
+      }),
+
+    // Delete a pantry item
+    delete: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        await db.deletePantryItem(input.id, ctx.user.id);
+        return { success: true };
+      }),
+  }),
+
+  // v0.6: Guest data migration API
+  migration: router({
+    // Migrate local data to cloud
+    migrateGuestData: protectedProcedure
+      .input(
+        z.object({
+          meals: z.array(
+            z.object({
+              date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+              mealType: z.enum(["lunch", "dinner"]),
+              dishName: z.string().min(1).max(255),
+              category: z.enum(["japanese", "western", "chinese", "other"]),
+              note: z.string().max(500).optional(),
+            })
+          ),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        let migratedCount = 0;
+        for (const meal of input.meals) {
+          // Check for duplicates
+          const existing = await db.getMealRecordByDateAndType(
+            ctx.user.id,
+            meal.date,
+            meal.mealType
+          );
+          if (!existing) {
+            await db.createMealRecord({
+              userId: ctx.user.id,
+              groupId: null,
+              date: meal.date,
+              mealType: meal.mealType,
+              dishName: meal.dishName,
+              category: meal.category,
+              note: meal.note || null,
+              imageUrl: null,
+            });
+            migratedCount++;
+          }
+        }
+        return { migratedCount };
+      }),
+  }),
 });
 
 export type AppRouter = typeof appRouter;

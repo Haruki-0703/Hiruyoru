@@ -3,7 +3,7 @@
  * QAエンジニア向けのテスト支援ユーティリティ
  */
 
-import { vi } from 'vitest';
+import { vi, it, expect } from 'vitest';
 
 // テストデータ生成ヘルパー
 export class TestDataFactory {

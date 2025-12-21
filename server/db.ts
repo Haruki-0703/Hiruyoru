@@ -363,3 +363,155 @@ export async function getGroupMealsForDate(groupId: number, date: string): Promi
     userName: usersResult.find(u => u.id === meal.userId)?.name || null,
   }));
 }
+
+// ==================== v0.6: Favorite Meals ====================
+
+export async function getFavoriteMeals(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const { favoriteMeals } = await import("../drizzle/schema");
+  return await db
+    .select()
+    .from(favoriteMeals)
+    .where(eq(favoriteMeals.userId, userId))
+    .orderBy(desc(favoriteMeals.lastUsedAt));
+}
+
+export async function createFavoriteMeal(data: {
+  userId: number;
+  dishName: string;
+  category: string;
+  note: string | null;
+  imageUrl: string | null;
+}): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const { favoriteMeals } = await import("../drizzle/schema");
+  const result = await db.insert(favoriteMeals).values(data as any);
+  return Number(result[0].insertId);
+}
+
+export async function deleteFavoriteMeal(id: number, userId: number) {
+  const db = await getDb();
+  if (!db) return;
+
+  const { favoriteMeals } = await import("../drizzle/schema");
+  await db
+    .delete(favoriteMeals)
+    .where(and(eq(favoriteMeals.id, id), eq(favoriteMeals.userId, userId)));
+}
+
+export async function incrementFavoriteUsage(id: number, userId: number) {
+  const db = await getDb();
+  if (!db) return;
+
+  const { favoriteMeals } = await import("../drizzle/schema");
+  const favorite = await db
+    .select()
+    .from(favoriteMeals)
+    .where(and(eq(favoriteMeals.id, id), eq(favoriteMeals.userId, userId)))
+    .limit(1);
+
+  if (favorite.length > 0) {
+    await db
+      .update(favoriteMeals)
+      .set({
+        usageCount: (favorite[0].usageCount || 0) + 1,
+        lastUsedAt: new Date(),
+      })
+      .where(eq(favoriteMeals.id, id));
+  }
+}
+
+// ==================== v0.6: Pantry Inventory ====================
+
+export async function getPantryInventory(userId: number, groupId?: number) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const { pantryInventory } = await import("../drizzle/schema");
+  const conditions = [eq(pantryInventory.userId, userId)];
+  if (groupId) {
+    conditions.push(eq(pantryInventory.groupId, groupId));
+  }
+
+  return await db
+    .select()
+    .from(pantryInventory)
+    .where(and(...conditions))
+    .orderBy(desc(pantryInventory.createdAt));
+}
+
+export async function createPantryItem(data: {
+  userId: number;
+  groupId: number | null;
+  ingredientName: string;
+  quantity: string | null;
+  unit: string | null;
+  category: string;
+  expiryDate: string | null;
+  lowStockAlert: boolean;
+}): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const { pantryInventory } = await import("../drizzle/schema");
+  const result = await db.insert(pantryInventory).values(data as any);
+  return Number(result[0].insertId);
+}
+
+export async function updatePantryItem(
+  id: number,
+  userId: number,
+  data: {
+    quantity?: string;
+    expiryDate?: string;
+    lowStockAlert?: boolean;
+  }
+) {
+  const db = await getDb();
+  if (!db) return;
+
+  const { pantryInventory } = await import("../drizzle/schema");
+  await db
+    .update(pantryInventory)
+    .set(data as any)
+    .where(and(eq(pantryInventory.id, id), eq(pantryInventory.userId, userId)));
+}
+
+export async function deletePantryItem(id: number, userId: number) {
+  const db = await getDb();
+  if (!db) return;
+
+  const { pantryInventory } = await import("../drizzle/schema");
+  await db
+    .delete(pantryInventory)
+    .where(and(eq(pantryInventory.id, id), eq(pantryInventory.userId, userId)));
+}
+
+// ==================== v0.6: Guest Data Migration ====================
+
+export async function getMealRecordByDateAndType(
+  userId: number,
+  date: string,
+  mealType: "lunch" | "dinner"
+) {
+  const db = await getDb();
+  if (!db) return null;
+
+  const result = await db
+    .select()
+    .from(mealRecords)
+    .where(
+      and(
+        eq(mealRecords.userId, userId),
+        eq(mealRecords.date, date),
+        eq(mealRecords.mealType, mealType)
+      )
+    )
+    .limit(1);
+
+  return result.length > 0 ? result[0] : null;
+}

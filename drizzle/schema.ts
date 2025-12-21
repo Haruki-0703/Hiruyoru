@@ -41,6 +41,7 @@ export const mealRecords = mysqlTable("meal_records", {
   category: mysqlEnum("category", ["japanese", "western", "chinese", "other"]).notNull(),
   note: text("note"),
   imageUrl: text("imageUrl"),
+  isFavorite: boolean("isFavorite").default(false), // v0.6: お気に入りフラグ
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -77,3 +78,42 @@ export const groupMembers = mysqlTable("group_members", {
 
 export type GroupMember = typeof groupMembers.$inferSelect;
 export type InsertGroupMember = typeof groupMembers.$inferInsert;
+
+/**
+ * Favorite meals table - v0.6: お気に入りメニュー機能
+ */
+export const favoriteMeals = mysqlTable("favorite_meals", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  dishName: varchar("dishName", { length: 255 }).notNull(),
+  category: mysqlEnum("category", ["japanese", "western", "chinese", "other"]).notNull(),
+  note: text("note"),
+  imageUrl: text("imageUrl"),
+  usageCount: int("usageCount").default(0), // 使用回数
+  lastUsedAt: timestamp("lastUsedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type FavoriteMeal = typeof favoriteMeals.$inferSelect;
+export type InsertFavoriteMeal = typeof favoriteMeals.$inferInsert;
+
+/**
+ * Pantry inventory table - v0.6: 食材在庫管理機能
+ */
+export const pantryInventory = mysqlTable("pantry_inventory", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  groupId: int("groupId"), // Optional group association
+  ingredientName: varchar("ingredientName", { length: 255 }).notNull(),
+  quantity: varchar("quantity", { length: 50 }), // "2個", "500g" など
+  unit: varchar("unit", { length: 20 }), // "個", "g", "ml" など
+  category: mysqlEnum("category", ["vegetable", "meat", "fish", "seasoning", "other"]).notNull(),
+  expiryDate: varchar("expiryDate", { length: 10 }), // YYYY-MM-DD format
+  lowStockAlert: boolean("lowStockAlert").default(false),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type PantryInventory = typeof pantryInventory.$inferSelect;
+export type InsertPantryInventory = typeof pantryInventory.$inferInsert;
